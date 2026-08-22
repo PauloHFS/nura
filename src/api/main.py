@@ -1,9 +1,10 @@
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Request
 from src.adapters.database import create_db_and_tables
 from src.services.meal_optimizer import MealOptimizerService, OptimizationRequest, OptimizationResult
 from src.adapters.chroma_adapter import ChromaNutritionalRepository
+from src.adapters.telegram_adapter import parse_telegram_update
 
 _chroma_repo_instance: Optional[ChromaNutritionalRepository] = None
 
@@ -41,3 +42,9 @@ def optimize_meal(
 ):
     optimizer = MealOptimizerService(repo=repo)
     return optimizer.solve(request)
+
+@app.post("/webhook/telegram")
+async def telegram_webhook(request: Request):
+    payload = await request.json()
+    update = parse_telegram_update(payload)
+    return {"status": "ok", "update_id": update.update_id}
