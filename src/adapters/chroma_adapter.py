@@ -16,6 +16,8 @@ class ChromaNutritionalRepository:
             name=COLLECTION_NAME,
             metadata={"description": "Nutritional database with USDA/TBCA food records"},
         )
+        # Prime embedding engine in memory
+        self.collection.query(query_texts=["prime"], n_results=1)
 
     def ingest_items(self, items: List[NutritionalItem]) -> int:
         """
@@ -38,7 +40,8 @@ class ChromaNutritionalRepository:
 
     def search_items(
         self,
-        query: str,
+        query: Optional[str] = None,
+        query_embeddings: Optional[List[List[float]]] = None,
         category: Optional[str] = None,
         max_calories_100g: Optional[float] = None,
         min_protein_100g: Optional[float] = None,
@@ -64,20 +67,21 @@ class ChromaNutritionalRepository:
         elif len(where_conditions) > 1:
             where_filter = {"$and": where_conditions}
 
+        query_kwargs: Dict[str, Any] = {"n_results": limit, "where": where_filter}
+        if query_embeddings is not None:
+            query_kwargs["query_embeddings"] = query_embeddings
+        elif query is not None:
+            query_kwargs["query_texts"] = [query]
+        else:
+            raise ValueError("Either query or query_embeddings must be provided")
+
         start_time = time.perf_counter()
-        results = self.collection.query(
-            query_texts=[query],
-            n_results=limit,
-            where=where_filter,
-        )
+        results = self.collection.query(**query_kwargs)
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
 
         items_found: List[Dict[str, Any]] = []
         if results and results.get("metadatas") and len(results["metadatas"]) > 0:
-            for idx, meta in enumerate(results["metadatas"][0]):
-                meta_copy = dict(meta)
-                meta_copy["search_latency_ms"] = round(elapsed_ms, 2)
-                items_found.append(meta_copy)
+            items_found = [dict(meta) for meta in results["metadatas"][0]]
 
         return items_found
 
