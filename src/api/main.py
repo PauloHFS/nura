@@ -1,7 +1,10 @@
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, List, Optional
 from fastapi import FastAPI, Depends, Request
-from src.adapters.database import create_db_and_tables
+from fastapi.responses import HTMLResponse
+from sqlmodel import Session, select
+from src.adapters.database import create_db_and_tables, get_session
+from src.domain.models import PatientProfile, MealPlanRecord, AuditLogRecord, NutritionistFeedbackRecord
 from src.services.meal_optimizer import MealOptimizerService, OptimizationRequest, OptimizationResult
 from src.adapters.chroma_adapter import ChromaNutritionalRepository
 from src.adapters.telegram_adapter import parse_telegram_update, TelegramClient
@@ -85,3 +88,67 @@ async def telegram_webhook(
         tg_client.send_message(chat_id=chat_id, text=reply)
 
     return {"status": "ok", "update_id": update.update_id}
+@app.get("/api/audit/plans")
+def list_audit_plans(patient_id: Optional[str] = None, session: Session = Depends(get_session)):
+    query = select(MealPlanRecord)
+    if patient_id:
+        query = query.where(MealPlanRecord.patient_id == patient_id)
+    return session.exec(query).all()
+
+@app.get("/api/audit/logs")
+def list_audit_logs(patient_id: Optional[str] = None, session: Session = Depends(get_session)):
+    query = select(AuditLogRecord)
+    if patient_id:
+        query = query.where(AuditLogRecord.patient_id == patient_id)
+    return session.exec(query).all()
+
+@app.get("/api/audit/patients/{patient_id}")
+def get_patient_audit_summary(patient_id: str, session: Session = Depends(get_session)):
+    profile = session.exec(select(PatientProfile).where(PatientProfile.patient_id == patient_id)).first()
+    plans = session.exec(select(MealPlanRecord).where(MealPlanRecord.patient_id == patient_id)).all()
+    logs = session.exec(select(AuditLogRecord).where(AuditLogRecord.patient_id == patient_id)).all()
+    feedback = session.exec(select(NutritionistFeedbackRecord).where(NutritionistFeedbackRecord.patient_id == patient_id)).all()
+    return {
+        "patient_id": patient_id,
+        "profile": profile,
+        "plans": plans,
+        "logs": logs,
+        "feedback": feedback,
+    }
+
+@app.post("/api/audit/feedback")
+def submit_nutritionist_feedback(feedback_data: dict, session: Session = Depends(get_session)):
+    rec = NutritionistFeedbackRecord(
+        patient_id=feedback_data.get("patient_id", ""),
+        meal_plan_id=feedback_data.get("meal_plan_id"),
+        nutritionist_name=feedback_data.get("nutritionist_name", "Nutricionista"),
+        notes=feedback_data.get("notes", ""),
+        status=feedback_data.get("status", "reviewed"),
+    )
+    session.add(rec)
+    session.commit()
+    session.refresh(rec)
+    return {"status": "ok", "feedback_id": rec.id}
+
+@app.get("/api/audit/dashboard", response_class=HTMLResponse)
+def audit_dashboard():
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Nura - Painel Assíncrono de Auditoria Nutricional</title>
+        <style>
+            body { font-family: sans-serif; margin: 40px; background: #f4f6f8; }
+            h1 { color: #2c3e50; }
+            .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h1>Painel Assíncrono de Auditoria Nutricional (Nura)</h1>
+            <p>Plataforma de inspeção pós-geração e feedback especializado por nutricionistas humanos.</p>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
