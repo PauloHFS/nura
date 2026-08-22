@@ -44,7 +44,7 @@ def test_solver_vector_expansion_fallback(test_repo: ChromaNutritionalRepository
 
     optimizer = MealOptimizerService(repo=test_repo)
     request = OptimizationRequest(
-        target_calories=500.0,
+        target_calories=450.0,
         target_protein_g=40.0,
         target_carbs_g=50.0,
         target_fat_g=10.0,

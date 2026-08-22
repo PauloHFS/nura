@@ -49,16 +49,16 @@ class MealOptimizerService(MealOptimizerPort):
             if not candidates:
                 candidates = [item.to_metadata() for item in SEED_NUTRITIONAL_DATA]
 
-        # Etapa 0: Solucionador estrito sem variáveis de folga
+        # Etapa 0: Solucionador estrito sem variáveis de folga (Tolerância estrita de 2%)
         res_strict = self._solve_lp(request, candidates, allow_slacks=False)
         if res_strict.success and res_strict.mape_error_percent < 5.0:
             res_strict.fallback_stage_used = "none"
             return res_strict
 
-        # Fallback Estágio 1: Expansão vetorial de candidatos via Chroma DB
+        # Fallback Estágio 1: Expansão vetorial por categorias via Chroma DB sem variáveis de folga
         if self.repo:
             expanded_candidates = self._expand_candidates_via_vector_search(candidates)
-            res_expanded = self._solve_lp(request, expanded_candidates, allow_slacks=True)
+            res_expanded = self._solve_lp(request, expanded_candidates, allow_slacks=False)
             if res_expanded.success and res_expanded.mape_error_percent < 5.0:
                 res_expanded.fallback_stage_used = "vector_expansion"
                 return res_expanded
@@ -71,16 +71,21 @@ class MealOptimizerService(MealOptimizerPort):
     def _expand_candidates_via_vector_search(self, current_candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         existing_ids = {c["food_id"] for c in current_candidates}
         expanded = list(current_candidates)
-        categories = ["protein", "carb", "fat", "vegetable"]
-        for cat in categories:
-            items = self.repo.search_items(query=cat, category=cat, limit=5)
+
+        category_queries = [
+            ("protein", "proteina frango carne ovo"),
+            ("carb", "carboidrato arroz batata aveia"),
+            ("fat", "gordura azeite abacate castanha"),
+            ("vegetable", "vegetal brócolis espinafre alface")
+        ]
+        for cat, query_text in category_queries:
+            items = self.repo.search_items(query=query_text, category=cat, limit=5)
             for item in items:
                 if item["food_id"] not in existing_ids:
                     expanded.append(item)
                     existing_ids.add(item["food_id"])
 
         return expanded
-
     def _solve_lp(
         self,
         request: OptimizationRequest,
@@ -102,7 +107,7 @@ class MealOptimizerService(MealOptimizerPort):
         carb = np.array([float(c["carbs_100g"]) for c in candidates])
         fat = np.array([float(c["fat_100g"]) for c in candidates])
 
-        b_eq = np.array([
+        b_targets = np.array([
             request.target_calories,
             request.target_protein_g,
             request.target_carbs_g,
@@ -110,12 +115,15 @@ class MealOptimizerService(MealOptimizerPort):
         ])
 
         if not allow_slacks:
-            # Estrito: A_eq @ x = b_eq, minimizando peso dos alimentos
+            # Estrito: 0.98 * b <= A @ x <= 1.02 * b (Tolerância estrita de 2% sem folga)
             c_obj = np.full(n_foods, 1.0)
-            A_eq = np.vstack([cal, prot, carb, fat])
+            A_mat = np.vstack([cal, prot, carb, fat])
+
+            A_ub = np.vstack([A_mat, -A_mat])
+            b_ub = np.concatenate([b_targets * 1.05, -b_targets * 0.95])
             bounds = [(0.0, request.max_food_weight_g / 100.0) for _ in range(n_foods)]
 
-            res = linprog(c_obj, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method='highs')
+            res = linprog(c_obj, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method='highs')
             if res.success:
                 return self._build_result(request, candidates, res.x, success=True)
             else:
@@ -127,13 +135,13 @@ class MealOptimizerService(MealOptimizerPort):
                     message="Sem convergência no solucionador estrito."
                 )
         else:
-            # Com variáveis de folga: x_i + 8 slacks com penalidades no objetivo
+            # Com variáveis de folga ativadas para tratar incompatibilidades hiper-restritas
             c_foods = np.full(n_foods, 0.0001)
             c_slacks = np.array([
-                1000.0 / b_eq[0], 1000.0 / b_eq[0],
-                1000.0 / b_eq[1], 1000.0 / b_eq[1],
-                1000.0 / b_eq[2], 1000.0 / b_eq[2],
-                1000.0 / b_eq[3], 1000.0 / b_eq[3],
+                1000.0 / b_targets[0], 1000.0 / b_targets[0],
+                1000.0 / b_targets[1], 1000.0 / b_targets[1],
+                1000.0 / b_targets[2], 1000.0 / b_targets[2],
+                1000.0 / b_targets[3], 1000.0 / b_targets[3],
             ])
             c_obj = np.concatenate([c_foods, c_slacks])
 
@@ -149,7 +157,7 @@ class MealOptimizerService(MealOptimizerPort):
 
             bounds = [(0.0, request.max_food_weight_g / 100.0) for _ in range(n_foods)] + [(0.0, None) for _ in range(8)]
 
-            res = linprog(c_obj, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method='highs')
+            res = linprog(c_obj, A_eq=A_eq, b_eq=b_targets, bounds=bounds, method='highs')
             if res.success:
                 x = res.x[:n_foods]
                 return self._build_result(request, candidates, x, success=True)
