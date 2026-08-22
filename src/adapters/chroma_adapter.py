@@ -64,7 +64,10 @@ class ChromaNutritionalRepository:
         elif len(where_conditions) > 1:
             where_filter = {"$and": where_conditions}
 
-        query_kwargs: Dict[str, Any] = {"n_results": limit, "where": where_filter}
+        query_kwargs: Dict[str, Any] = {"n_results": limit}
+        if where_filter:
+            query_kwargs["where"] = where_filter
+
         if query_embeddings is not None:
             query_kwargs["query_embeddings"] = query_embeddings
         elif query is not None:
@@ -76,7 +79,7 @@ class ChromaNutritionalRepository:
 
         items_found: List[Dict[str, Any]] = []
         if results and results.get("metadatas") and len(results["metadatas"]) > 0:
-            items_found = [dict(meta) for meta in results["metadatas"][0]]
+            items_found = [dict(meta) for meta in results["metadatas"][0] if meta]
 
         return items_found
 
