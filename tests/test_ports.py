@@ -21,7 +21,7 @@ class DummyPantry(PantryPort):
     def get_inventory_snapshot(self):
         return []
 
-    def deduct_item(self, item_id: str, quantity: float):
+    def deduct_item(self, item_id: str, quantity: float, confirmed: bool = False):
         return True
 
 class DummyGuardrail(GuardrailPort):
