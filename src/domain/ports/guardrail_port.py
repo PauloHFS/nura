@@ -1,9 +1,16 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from dataclasses import dataclass
+from typing import Optional
+
+@dataclass(frozen=True)
+class GuardrailResult:
+    is_safe: bool
+    intercepted_term: Optional[str] = None
+    latency_ms: float = 0.0
 
 class GuardrailPort(ABC):
     @abstractmethod
-    def scan(self, content: str) -> Any:
+    def scan(self, content: str) -> GuardrailResult:
         """
         Invariantes:
         - Execução em tempo linear O(n) com overhead < 5ms.
