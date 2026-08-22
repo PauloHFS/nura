@@ -57,7 +57,7 @@ class MealOptimizerService(MealOptimizerPort):
         if self.repo and request.candidate_foods is not None:
             expanded_candidates = self._expand_candidates_via_vector_search(candidates)
             result_expanded = self._solve_goal_programming(request, expanded_candidates)
-            if result_expanded.success and result_expanded.mape_error_percent < 5.0:
+            if result_expanded.success:
                 result_expanded.fallback_stage_used = "vector_expansion"
                 return result_expanded
 
@@ -108,7 +108,7 @@ class MealOptimizerService(MealOptimizerPort):
 
         # Variáveis: [x_1..x_n, s_cal-, s_cal+, s_prot-, s_prot+, s_carb-, s_carb+, s_fat-, s_fat+]
         # Objetivo: Minimizar soma ponderada das desviações percentuais dos macros + penalidade leve de peso
-        c_foods = np.zeros(n_foods)
+        c_foods = np.full(n_foods, 0.0001)
         c_slacks = np.array([
             100.0 / targets[0], 100.0 / targets[0],
             100.0 / targets[1], 100.0 / targets[1],
