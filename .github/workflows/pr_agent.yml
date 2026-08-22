@@ -28,18 +28,46 @@ jobs:
           OPENAI_KEY: ${{ secrets.OMNIROUTE_API_KEY }}
           OPENAI.API_BASE: "https://omniroute.02092000.xyz/v1"
           
-          # Roteamento de Modelo
+          # Roteamento de Modelo e Limites de Tokens (Budget Máximo sem Truncar Arquivos)
           CONFIG.MODEL: "openai/auto/pro-coding"
           CONFIG.FALLBACK_MODELS: '["openai/auto/best-coding-fast"]'
-          CONFIG.CUSTOM_MODEL_MAX_TOKENS: 128000
-          
-          # Comportamento de Revisão Inline
+          CONFIG.MAX_MODEL_TOKENS: 256000
+          CONFIG.CUSTOM_MODEL_MAX_TOKENS: 256000
+          CONFIG.REASONING_EFFORT: "high"
+          CONFIG.ALLOW_DYNAMIC_CONTEXT: "true"
+          CONFIG.MAX_EXTRA_LINES_BEFORE_DYNAMIC_CONTEXT: 30
+          CONFIG.PATCH_EXTRA_LINES_BEFORE: 10
+          CONFIG.PATCH_EXTRA_LINES_AFTER: 5
+          CONFIG.REPO_CONTEXT_FILES: '["AGENTS.md", "CONTEXT.md"]'
+          CONFIG.REPO_CONTEXT_MAX_LINES: 2000
+
+          # Auto Actions no PR (opened, reopened, synchronize)
+          GITHUB_ACTION_CONFIG.PR_ACTIONS: '["opened", "reopened", "synchronize"]'
+          GITHUB_ACTION_CONFIG.AUTO_REVIEW: "true"
+          GITHUB_ACTION_CONFIG.AUTO_DESCRIBE: "true"
+          GITHUB_ACTION_CONFIG.AUTO_IMPROVE: "true"
+
+          # Configurações de Review Profundo (/review)
           PR_REVIEWER.INLINE_CODE_COMMENTS: "true"
           PR_REVIEWER.REQUIRE_SECURITY_REVIEW: "true"
           PR_REVIEWER.REQUIRE_TESTS_REVIEW: "true"
-          PR_REVIEWER.NUM_CODE_SUGGESTIONS: 5
+          PR_REVIEWER.REQUIRE_SCORE_REVIEW: "true"
+          PR_REVIEWER.REQUIRE_ESTIMATE_EFFORT_TO_REVIEW: "true"
+          PR_REVIEWER.REQUIRE_CAN_BE_SPLIT_REVIEW: "true"
+          PR_REVIEWER.REQUIRE_TODO_SCAN: "true"
+          PR_REVIEWER.REQUIRE_TICKET_ANALYSIS_REVIEW: "true"
+          PR_REVIEWER.NUM_MAX_FINDINGS: 10
+          PR_REVIEWER.ENABLE_REVIEW_LABELS_SECURITY: "true"
+          PR_REVIEWER.ENABLE_REVIEW_LABELS_EFFORT: "true"
+
+          # Sugestões de Código Avançadas (/improve)
+          PR_CODE_SUGGESTIONS.NUM_CODE_SUGGESTIONS_PER_CHUNK: 5
+          PR_CODE_SUGGESTIONS.MAX_NUMBER_OF_CALLS: 5
+          PR_CODE_SUGGESTIONS.AUTO_EXTENDED_MODE: "true"
           PR_CODE_SUGGESTIONS.COMMITABLE_CODE_SUGGESTIONS: "true"
-          PR_CODE_SUGGESTIONS.RANK_THRESHOLD: 2
+          PR_CODE_SUGGESTIONS.RANK_THRESHOLD: 1
+          PR_CODE_SUGGESTIONS.SUGGESTIONS_SCORE_THRESHOLD: 0
+          PR_CODE_SUGGESTIONS.DUAL_PUBLISHING_SCORE_THRESHOLD: 0
 
           # Persona: Linus Torvalds
           PR_REVIEWER.EXTRA_INSTRUCTIONS: >-
