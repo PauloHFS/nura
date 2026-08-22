@@ -160,7 +160,7 @@ class MealOptimizerService(MealOptimizerPort):
 
         for idx, units in enumerate(x):
             weight_g = round(float(units) * 100.0, 1)
-            if weight_g >= 5.0:  # Ignorar porções irrisórias < 5g
+            if weight_g >= 0.1:  # Incluir porções com peso relevante >= 0.1g
                 c = candidates[idx]
                 item_cal = round(float(c["calories_100g"]) * units, 1)
                 item_prot = round(float(c["protein_100g"]) * units, 1)

@@ -26,8 +26,9 @@ def health_check():
 from src.services.meal_optimizer import MealOptimizerService, OptimizationRequest, OptimizationResult
 from src.adapters.chroma_adapter import ChromaNutritionalRepository
 
+repo_instance = ChromaNutritionalRepository()
+
 @app.post("/api/meal/optimize", response_model=OptimizationResult)
 def optimize_meal(request: OptimizationRequest):
-    repo = ChromaNutritionalRepository()
-    optimizer = MealOptimizerService(repo=repo)
+    optimizer = MealOptimizerService(repo=repo_instance)
     return optimizer.solve(request)
