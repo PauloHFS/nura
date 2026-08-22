@@ -1,5 +1,4 @@
 import os
-import time
 from typing import List, Optional, Dict, Any
 import chromadb
 from chromadb.config import Settings
@@ -16,8 +15,6 @@ class ChromaNutritionalRepository:
             name=COLLECTION_NAME,
             metadata={"description": "Nutritional database with USDA/TBCA food records"},
         )
-        # Prime embedding engine in memory
-        self.collection.query(query_texts=["prime"], n_results=1)
 
     def ingest_items(self, items: List[NutritionalItem]) -> int:
         """
@@ -75,9 +72,7 @@ class ChromaNutritionalRepository:
         else:
             raise ValueError("Either query or query_embeddings must be provided")
 
-        start_time = time.perf_counter()
         results = self.collection.query(**query_kwargs)
-        elapsed_ms = (time.perf_counter() - start_time) * 1000.0
 
         items_found: List[Dict[str, Any]] = []
         if results and results.get("metadatas") and len(results["metadatas"]) > 0:
