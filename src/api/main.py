@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from src.adapters.database import create_db_and_tables
+from src.services.meal_optimizer import MealOptimizerService, OptimizationRequest, OptimizationResult
+from src.adapters.chroma_adapter import ChromaNutritionalRepository
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -23,12 +25,14 @@ def health_check():
         "architecture": "hexagonal",
         "version": "0.1.0",
     }
-from src.services.meal_optimizer import MealOptimizerService, OptimizationRequest, OptimizationResult
-from src.adapters.chroma_adapter import ChromaNutritionalRepository
 
-repo_instance = ChromaNutritionalRepository()
+def get_chroma_repo() -> ChromaNutritionalRepository:
+    return ChromaNutritionalRepository()
 
 @app.post("/api/meal/optimize", response_model=OptimizationResult)
-def optimize_meal(request: OptimizationRequest):
-    optimizer = MealOptimizerService(repo=repo_instance)
+def optimize_meal(
+    request: OptimizationRequest,
+    repo: ChromaNutritionalRepository = Depends(get_chroma_repo)
+):
+    optimizer = MealOptimizerService(repo=repo)
     return optimizer.solve(request)

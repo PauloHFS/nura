@@ -43,35 +43,37 @@ class MealOptimizerService(MealOptimizerPort):
     def solve(self, request: OptimizationRequest) -> OptimizationResult:
         candidates = list(request.candidate_foods) if request.candidate_foods is not None else []
 
-        # Se nenhuma lista de candidatos foi fornecida, carrega universo completo da base seed / repo
         if not candidates:
-            candidates = [item.to_metadata() for item in SEED_NUTRITIONAL_DATA]
+            if self.repo:
+                candidates = self.repo.search_items(query="alimento", limit=20)
+            if not candidates:
+                candidates = [item.to_metadata() for item in SEED_NUTRITIONAL_DATA]
 
-        # Etapa 1: Resolução por Programação de Metas (Goal Programming L1 Optimization)
-        result = self._solve_goal_programming(request, candidates)
-        if result.success and result.mape_error_percent < 5.0:
-            result.fallback_stage_used = "none"
-            return result
+        # Etapa 0: Solucionador estrito sem variáveis de folga
+        res_strict = self._solve_lp(request, candidates, allow_slacks=False)
+        if res_strict.success and res_strict.mape_error_percent < 5.0:
+            res_strict.fallback_stage_used = "none"
+            return res_strict
 
-        # Fallback Estágio 1: Expansão vetorial caso candidatos fornecidos pelo usuário fossem insuficientes
-        if self.repo and request.candidate_foods is not None:
+        # Fallback Estágio 1: Expansão vetorial de candidatos via Chroma DB
+        if self.repo:
             expanded_candidates = self._expand_candidates_via_vector_search(candidates)
-            result_expanded = self._solve_goal_programming(request, expanded_candidates)
-            if result_expanded.success:
-                result_expanded.fallback_stage_used = "vector_expansion"
-                return result_expanded
+            res_expanded = self._solve_lp(request, expanded_candidates, allow_slacks=True)
+            if res_expanded.success and res_expanded.mape_error_percent < 5.0:
+                res_expanded.fallback_stage_used = "vector_expansion"
+                return res_expanded
 
-        # Fallback Estágio 2: Retorna o resultado da Programação de Metas indicando o uso de folgas
-        result.fallback_stage_used = "slack_variables"
-        return result
+        # Fallback Estágio 2: Ativação dinâmica de variáveis de folga (slack variables)
+        res_slack = self._solve_lp(request, candidates, allow_slacks=True)
+        res_slack.fallback_stage_used = "slack_variables"
+        return res_slack
 
     def _expand_candidates_via_vector_search(self, current_candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         existing_ids = {c["food_id"] for c in current_candidates}
         expanded = list(current_candidates)
-
         categories = ["protein", "carb", "fat", "vegetable"]
         for cat in categories:
-            items = self.repo.search_items(query=f"alimento rico em {cat}", category=cat, limit=5)
+            items = self.repo.search_items(query=cat, category=cat, limit=5)
             for item in items:
                 if item["food_id"] not in existing_ids:
                     expanded.append(item)
@@ -79,10 +81,11 @@ class MealOptimizerService(MealOptimizerPort):
 
         return expanded
 
-    def _solve_goal_programming(
+    def _solve_lp(
         self,
         request: OptimizationRequest,
-        candidates: List[Dict[str, Any]]
+        candidates: List[Dict[str, Any]],
+        allow_slacks: bool = False
     ) -> OptimizationResult:
         n_foods = len(candidates)
         if n_foods == 0:
@@ -99,51 +102,65 @@ class MealOptimizerService(MealOptimizerPort):
         carb = np.array([float(c["carbs_100g"]) for c in candidates])
         fat = np.array([float(c["fat_100g"]) for c in candidates])
 
-        targets = np.array([
+        b_eq = np.array([
             request.target_calories,
             request.target_protein_g,
             request.target_carbs_g,
             request.target_fat_g
         ])
 
-        # Variáveis: [x_1..x_n, s_cal-, s_cal+, s_prot-, s_prot+, s_carb-, s_carb+, s_fat-, s_fat+]
-        # Objetivo: Minimizar soma ponderada das desviações percentuais dos macros + penalidade leve de peso
-        c_foods = np.full(n_foods, 0.0001)
-        c_slacks = np.array([
-            100.0 / targets[0], 100.0 / targets[0],
-            100.0 / targets[1], 100.0 / targets[1],
-            100.0 / targets[2], 100.0 / targets[2],
-            100.0 / targets[3], 100.0 / targets[3],
-        ])
-        c_obj = np.concatenate([c_foods, c_slacks])
+        if not allow_slacks:
+            # Estrito: A_eq @ x = b_eq, minimizando peso dos alimentos
+            c_obj = np.full(n_foods, 1.0)
+            A_eq = np.vstack([cal, prot, carb, fat])
+            bounds = [(0.0, request.max_food_weight_g / 100.0) for _ in range(n_foods)]
 
-        # Restrições de igualdade: macro_i @ x + s_i- - s_i+ = target_i
-        A_eq = np.zeros((4, n_foods + 8))
-        A_eq[0, :n_foods] = cal
-        A_eq[1, :n_foods] = prot
-        A_eq[2, :n_foods] = carb
-        A_eq[3, :n_foods] = fat
-
-        for i in range(4):
-            A_eq[i, n_foods + 2 * i] = 1.0       # s- (defict)
-            A_eq[i, n_foods + 2 * i + 1] = -1.0  # s+ (surplus)
-
-        b_eq = targets
-        bounds = [(0.0, request.max_food_weight_g / 100.0) for _ in range(n_foods)] + [(0.0, None) for _ in range(8)]
-
-        res = linprog(c_obj, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method='highs')
-
-        if res.success:
-            x = res.x[:n_foods]
-            return self._build_result(request, candidates, x, success=True)
+            res = linprog(c_obj, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method='highs')
+            if res.success:
+                return self._build_result(request, candidates, res.x, success=True)
+            else:
+                return OptimizationResult(
+                    success=False,
+                    mape_error_percent=100.0,
+                    total_calories=0, total_protein_g=0, total_carbs_g=0, total_fat_g=0,
+                    ingredients=[],
+                    message="Sem convergência no solucionador estrito."
+                )
         else:
-            return OptimizationResult(
-                success=False,
-                mape_error_percent=100.0,
-                total_calories=0, total_protein_g=0, total_carbs_g=0, total_fat_g=0,
-                ingredients=[],
-                message="Falha no solucionador de metas."
-            )
+            # Com variáveis de folga: x_i + 8 slacks com penalidades no objetivo
+            c_foods = np.full(n_foods, 0.0001)
+            c_slacks = np.array([
+                1000.0 / b_eq[0], 1000.0 / b_eq[0],
+                1000.0 / b_eq[1], 1000.0 / b_eq[1],
+                1000.0 / b_eq[2], 1000.0 / b_eq[2],
+                1000.0 / b_eq[3], 1000.0 / b_eq[3],
+            ])
+            c_obj = np.concatenate([c_foods, c_slacks])
+
+            A_eq = np.zeros((4, n_foods + 8))
+            A_eq[0, :n_foods] = cal
+            A_eq[1, :n_foods] = prot
+            A_eq[2, :n_foods] = carb
+            A_eq[3, :n_foods] = fat
+
+            for i in range(4):
+                A_eq[i, n_foods + 2 * i] = 1.0       # s-
+                A_eq[i, n_foods + 2 * i + 1] = -1.0  # s+
+
+            bounds = [(0.0, request.max_food_weight_g / 100.0) for _ in range(n_foods)] + [(0.0, None) for _ in range(8)]
+
+            res = linprog(c_obj, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method='highs')
+            if res.success:
+                x = res.x[:n_foods]
+                return self._build_result(request, candidates, x, success=True)
+            else:
+                return OptimizationResult(
+                    success=False,
+                    mape_error_percent=100.0,
+                    total_calories=0, total_protein_g=0, total_carbs_g=0, total_fat_g=0,
+                    ingredients=[],
+                    message="Falha total no solucionador com folgas."
+                )
 
     def _build_result(
         self,
@@ -159,8 +176,8 @@ class MealOptimizerService(MealOptimizerPort):
         tot_fat = 0.0
 
         for idx, units in enumerate(x):
-            weight_g = round(float(units) * 100.0, 1)
-            if weight_g >= 0.1:  # Incluir porções com peso relevante >= 0.1g
+            if units > 1e-5:  # Incluir todos os ingredientes com quantidade não-nula
+                weight_g = round(float(units) * 100.0, 1)
                 c = candidates[idx]
                 item_cal = round(float(c["calories_100g"]) * units, 1)
                 item_prot = round(float(c["protein_100g"]) * units, 1)
