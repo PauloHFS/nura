@@ -23,3 +23,11 @@ def health_check():
         "architecture": "hexagonal",
         "version": "0.1.0",
     }
+from src.services.meal_optimizer import MealOptimizerService, OptimizationRequest, OptimizationResult
+from src.adapters.chroma_adapter import ChromaNutritionalRepository
+
+@app.post("/api/meal/optimize", response_model=OptimizationResult)
+def optimize_meal(request: OptimizationRequest):
+    repo = ChromaNutritionalRepository()
+    optimizer = MealOptimizerService(repo=repo)
+    return optimizer.solve(request)
