@@ -38,3 +38,12 @@ class AuditLogRecord(SQLModel, table=True):
     action: str
     details_json: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+class NutritionistFeedbackRecord(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    patient_id: str = Field(index=True)
+    meal_plan_id: Optional[int] = Field(default=None)
+    nutritionist_name: str
+    notes: str
+    status: str = Field(default="reviewed")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
