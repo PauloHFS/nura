@@ -31,6 +31,7 @@ jobs:
           # Roteamento de Modelo
           CONFIG.MODEL: "openai/auto/pro-coding"
           CONFIG.FALLBACK_MODELS: '["openai/auto/best-coding-fast"]'
+          CONFIG.CUSTOM_MODEL_MAX_TOKENS: 32000
           
           # Comportamento de Revisão Inline
           PR_REVIEWER.INLINE_CODE_COMMENTS: "true"
