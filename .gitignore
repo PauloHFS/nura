@@ -4,4 +4,4 @@ __pycache__/
 .pytest_cache/
 *.db
 .DS_Store
-EOF
+chroma_data/
