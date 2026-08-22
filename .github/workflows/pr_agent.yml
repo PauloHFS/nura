@@ -1,0 +1,52 @@
+name: PR Agent (Linus Persona)
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr_agent:
+    if: github.event.pull_request.draft == false || github.event_name == 'issue_comment'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+      contents: read
+    steps:
+      - name: Execute PR Agent Review
+        uses: qodo-ai/pr-agent@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+          # Endpoint OmniRoute (LiteLLM OpenAI-Compatible)
+          OPENAI_KEY: ${{ secrets.OMNIROUTE_API_KEY }}
+          OPENAI.API_BASE: "https://omniroute.02092000.xyz/v1"
+          
+          # Roteamento de Modelo
+          CONFIG.MODEL: "openai/auto/pro-coding"
+          CONFIG.FALLBACK_MODELS: '["openai/auto/best-coding-fast"]'
+          
+          # Comportamento de Revisão Inline
+          PR_REVIEWER.INLINE_CODE_COMMENTS: "true"
+          PR_REVIEWER.REQUIRE_SECURITY_REVIEW: "true"
+          PR_REVIEWER.REQUIRE_TESTS_REVIEW: "true"
+          PR_REVIEWER.NUM_CODE_SUGGESTIONS: 5
+          PR_CODE_SUGGESTIONS.COMMITABLE_CODE_SUGGESTIONS: "true"
+          PR_CODE_SUGGESTIONS.RANK_THRESHOLD: 2
+
+          # Persona: Linus Torvalds
+          PR_REVIEWER.EXTRA_INSTRUCTIONS: >-
+            Adopt the persona of Linus Torvalds conducting a strict Linux kernel code review:
+            - Be brutally honest, direct, and uncompromising about code quality, performance, memory allocation, and simplicity.
+            - Ruthlessly reject over-engineering, unnecessary abstractions, convoluted logic, and bloat.
+            - Point out edge cases, cache locality issues, bad naming, and poor error handling with cold precision.
+          PR_CODE_SUGGESTIONS.EXTRA_INSTRUCTIONS: >-
+            Act strictly as Linus Torvalds:
+            - Tear apart inefficient implementations.
+            - Provide minimal, clean, robust, and high-performance refactored code directly as suggestions.
