@@ -8,12 +8,19 @@ from src.domain.models import PatientProfile, MealPlanRecord, AuditLogRecord, Nu
 from src.services.meal_optimizer import MealOptimizerService, OptimizationRequest, OptimizationResult
 from src.adapters.chroma_adapter import ChromaNutritionalRepository
 from src.adapters.telegram_adapter import parse_telegram_update, TelegramClient
+from src.adapters.hermes_adapter import (
+    HermesAdapter,
+    HermesRequestPayload,
+    HermesResponsePayload,
+    HermesOutboundSubscriptionPayload,
+)
+from src.domain.ports.coach_channel_port import ChannelMessageRequest
 from src.graph.orchestrator import NuraOrchestrator
 
 _chroma_repo_instance: Optional[ChromaNutritionalRepository] = None
 _telegram_client_instance: Optional[TelegramClient] = None
 _orchestrator_instance: Optional[NuraOrchestrator] = None
-
+_hermes_adapter_instance: Optional[HermesAdapter] = None
 def get_chroma_repo() -> ChromaNutritionalRepository:
     global _chroma_repo_instance
     if _chroma_repo_instance is None:
@@ -31,6 +38,11 @@ def get_orchestrator() -> NuraOrchestrator:
     if _orchestrator_instance is None:
         _orchestrator_instance = NuraOrchestrator()
     return _orchestrator_instance
+def get_hermes_adapter(orchestrator: NuraOrchestrator = Depends(get_orchestrator)) -> HermesAdapter:
+    global _hermes_adapter_instance
+    if _hermes_adapter_instance is None:
+        _hermes_adapter_instance = HermesAdapter(orchestrator=orchestrator)
+    return _hermes_adapter_instance
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -88,6 +100,33 @@ async def telegram_webhook(
         tg_client.send_message(chat_id=chat_id, text=reply)
 
     return {"status": "ok", "update_id": update.update_id}
+@app.post("/api/v1/hermes/message", response_model=HermesResponsePayload)
+def hermes_message_endpoint(
+    payload: HermesRequestPayload,
+    adapter: HermesAdapter = Depends(get_hermes_adapter),
+):
+    req = ChannelMessageRequest(
+        session_id=payload.session_id,
+        user_id=payload.user_id,
+        text=payload.text,
+        metadata=payload.metadata,
+    )
+    res = adapter.process_message(req)
+    return HermesResponsePayload(
+        session_id=res.session_id,
+        response_text=res.response_text,
+        step=res.step,
+        guardrail_blocked=res.guardrail_blocked,
+        suggested_actions=res.suggested_actions,
+    )
+
+@app.post("/api/v1/hermes/outbound")
+def hermes_outbound_subscription(
+    payload: HermesOutboundSubscriptionPayload,
+    adapter: HermesAdapter = Depends(get_hermes_adapter),
+):
+    adapter.register_outbound_webhook(payload.session_id, payload.callback_url)
+    return {"status": "subscribed", "session_id": payload.session_id}
 @app.get("/api/audit/plans")
 def list_audit_plans(patient_id: Optional[str] = None, session: Session = Depends(get_session)):
     query = select(MealPlanRecord)
