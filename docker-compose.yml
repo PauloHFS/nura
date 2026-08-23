@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  nura-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nura-backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - GROCY_BASE_URL=${GROCY_BASE_URL:-http://grocy:80}
+      - GROCY_API_KEY=${GROCY_API_KEY}
+      - DATABASE_URL=sqlite:////data/nura.db
+      - CHROMA_PERSIST_PATH=/data/chroma_data
+    volumes:
+      - nura_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  nura_data:
+    driver: local

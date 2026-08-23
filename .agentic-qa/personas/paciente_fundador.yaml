@@ -1,0 +1,33 @@
+persona:
+  name: "Paulo Paciente"
+  bio: "Paciente buscando perda de peso sustentável, interage ativamente via Telegram para receber cardápios e confirmar refeições consumidas."
+  disability: null
+
+  locale:
+    language: "pt-BR"
+    region: "BR"
+    currency: "BRL"
+    date_format: "DD/MM/YYYY"
+    timezone: "America/Sao_Paulo"
+
+  device:
+    type: "mobile"
+    model: "Samsung Galaxy S22"
+    os: "Android 13"
+  network:
+    profile: "4G"
+    download_mbps: 15.0
+    upload_mbps: 8.0
+    latency_ms: 30
+  viewport:
+    width: 360
+    height: 800
+
+  network_tolerance:
+    max_load_ms: 3000
+    on_timeout: "retry_once"
+    max_retries: 2
+
+  patience:
+    retries: 2
+    timeout: 5000
