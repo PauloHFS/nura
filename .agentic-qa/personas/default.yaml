@@ -1,0 +1,33 @@
+persona:
+  name: "Paciente-Fundador Padrão"
+  bio: "Usuário em acompanhamento de perda de peso e reeducação alimentar via Telegram Bot."
+  disability: null
+
+  locale:
+    language: "pt-BR"
+    region: "BR"
+    currency: "BRL"
+    date_format: "DD/MM/YYYY"
+    timezone: "America/Sao_Paulo"
+
+  device:
+    type: "mobile"
+    model: "iPhone 13"
+    os: "iOS 16"
+  network:
+    profile: "4G"
+    download_mbps: 10.0
+    upload_mbps: 5.0
+    latency_ms: 40
+  viewport:
+    width: 390
+    height: 844
+
+  network_tolerance:
+    max_load_ms: 3000
+    on_timeout: "retry_once"
+    max_retries: 2
+
+  patience:
+    retries: 2
+    timeout: 5000

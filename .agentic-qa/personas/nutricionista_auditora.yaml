@@ -1,0 +1,33 @@
+persona:
+  name: "Dra. Ana Auditora"
+  bio: "Nutricionista clínica responsável por auditar assincronamente os planos alimentares gerados pela IA e validar a segurança do paciente."
+  disability: null
+
+  locale:
+    language: "pt-BR"
+    region: "BR"
+    currency: "BRL"
+    date_format: "DD/MM/YYYY"
+    timezone: "America/Sao_Paulo"
+
+  device:
+    type: "desktop"
+    model: "MacBook Pro M1"
+    os: "macOS Sonoma"
+  network:
+    profile: "broadband"
+    download_mbps: 100.0
+    upload_mbps: 50.0
+    latency_ms: 10
+  viewport:
+    width: 1440
+    height: 900
+
+  network_tolerance:
+    max_load_ms: 2000
+    on_timeout: "retry_once"
+    max_retries: 2
+
+  patience:
+    retries: 3
+    timeout: 5000
