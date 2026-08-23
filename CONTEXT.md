@@ -40,9 +40,9 @@ _Avoid_: Violação de meta, aproximação livre.
 Ação no chat onde o usuário valida que consumiu a refeição proposta, servindo como gatilho único para atualização de saldo no Grocy.
 _Avoid_: Baixa automática, dedução otimista.
 
-**Canal do Coach (Telegram Bot)**:
-Interface conversacional primária via webhook e Telegram API para interação ativa, notifications proativas e coleta de confirmações do Paciente-Fundador.
-_Avoid_: Web UI, PWA, interface CLI.
+**Canal do Coach (Hermes Agent / Telegram Bot)**:
+Interface conversacional agêntica desacoplada (via adaptadores REST / Webhook) para interação ativa com o Paciente-Fundador, notificações proativas de check-in OARS e coleta de confirmações de consumo.
+_Avoid_: Interface Web UI acoplada, PWA, interface de chat monolítica.
 
 **Orquestrador de Grafo de Estados (StateGraph)**:
 Estrutura determinística do LangGraph que intercala nós de linguagem (LLM), nós de resolução matemática (OR-Tools) e checagens de segurança (Aho-Corasick) mantendo a persistência da conversa.
