@@ -4,9 +4,17 @@ from fastapi import FastAPI, Depends, Request
 from fastapi.responses import HTMLResponse
 from sqlmodel import Session, select
 from src.adapters.database import create_db_and_tables, get_session
-from src.domain.models import PatientProfile, MealPlanRecord, AuditLogRecord, NutritionistFeedbackRecord
+from src.domain.models import (
+    PatientProfile,
+    MealPlanRecord,
+    NutritionPlanRecord,
+    AuditLogRecord,
+    NutritionistFeedbackRecord,
+)
 from src.services.meal_optimizer import MealOptimizerService, OptimizationRequest, OptimizationResult
 from src.adapters.chroma_adapter import ChromaNutritionalRepository
+from src.adapters.grocy_adapter import GrocyAdapter
+from src.adapters.repositories import NutritionPlanRepository, AuditLogRepository
 from src.adapters.telegram_adapter import parse_telegram_update, TelegramClient
 from src.adapters.hermes_adapter import (
     HermesAdapter,
@@ -21,12 +29,19 @@ _chroma_repo_instance: Optional[ChromaNutritionalRepository] = None
 _telegram_client_instance: Optional[TelegramClient] = None
 _orchestrator_instance: Optional[NuraOrchestrator] = None
 _hermes_adapter_instance: Optional[HermesAdapter] = None
+_grocy_adapter_instance: Optional[GrocyAdapter] = None
+
+def get_grocy_adapter() -> GrocyAdapter:
+    global _grocy_adapter_instance
+    if _grocy_adapter_instance is None:
+        _grocy_adapter_instance = GrocyAdapter()
+    return _grocy_adapter_instance
+
 def get_chroma_repo() -> ChromaNutritionalRepository:
     global _chroma_repo_instance
     if _chroma_repo_instance is None:
         _chroma_repo_instance = ChromaNutritionalRepository()
     return _chroma_repo_instance
-
 def get_telegram_client() -> TelegramClient:
     global _telegram_client_instance
     if _telegram_client_instance is None:
@@ -68,11 +83,44 @@ def health_check():
 @app.post("/api/meal/optimize", response_model=OptimizationResult)
 def optimize_meal(
     request: OptimizationRequest,
-    repo: ChromaNutritionalRepository = Depends(get_chroma_repo)
+    repo: ChromaNutritionalRepository = Depends(get_chroma_repo),
+    grocy_adapter: GrocyAdapter = Depends(get_grocy_adapter),
+    session: Session = Depends(get_session),
 ):
-    optimizer = MealOptimizerService(repo=repo)
-    return optimizer.solve(request)
+    optimizer = MealOptimizerService(repo=repo, grocy_adapter=grocy_adapter)
+    result = optimizer.solve(request)
 
+    audit_repo = AuditLogRepository(session)
+    patient_id = request.patient_id or "default_patient"
+
+    if result.success:
+        plan_repo = NutritionPlanRepository(session)
+        plan_repo.save_plan(
+            patient_id=patient_id,
+            target_calories=request.target_calories,
+            target_protein_g=request.target_protein_g,
+            target_carbs_g=request.target_carbs_g,
+            target_fat_g=request.target_fat_g,
+            mape_error=result.mape_error_percent,
+            ingredients=result.ingredients,
+        )
+
+    audit_repo.log_action(
+        action="meal_optimized" if result.success else "meal_optimization_failed",
+        session_id=request.session_id,
+        user_id=patient_id,
+        patient_id=patient_id,
+        payload={
+            "target_calories": request.target_calories,
+            "total_calories": result.total_calories,
+            "mape_error": result.mape_error_percent,
+            "fallback_stage_used": result.fallback_stage_used,
+            "success": result.success,
+            "message": result.message,
+        },
+    )
+
+    return result
 @app.post("/webhook/telegram")
 async def telegram_webhook(
     request: Request,
@@ -129,23 +177,33 @@ def hermes_outbound_subscription(
     return {"status": "subscribed", "session_id": payload.session_id}
 @app.get("/api/audit/plans")
 def list_audit_plans(patient_id: Optional[str] = None, session: Session = Depends(get_session)):
-    query = select(MealPlanRecord)
+    query = select(NutritionPlanRecord)
     if patient_id:
-        query = query.where(MealPlanRecord.patient_id == patient_id)
-    return session.exec(query).all()
+        query = query.where(NutritionPlanRecord.patient_id == patient_id)
+    plans = list(session.exec(query).all())
+
+    query_legacy = select(MealPlanRecord)
+    if patient_id:
+        query_legacy = query_legacy.where(MealPlanRecord.patient_id == patient_id)
+    legacy_plans = session.exec(query_legacy).all()
+
+    plans.extend(legacy_plans)
+    return plans
 
 @app.get("/api/audit/logs")
 def list_audit_logs(patient_id: Optional[str] = None, session: Session = Depends(get_session)):
-    query = select(AuditLogRecord)
-    if patient_id:
-        query = query.where(AuditLogRecord.patient_id == patient_id)
-    return session.exec(query).all()
+    repo = AuditLogRepository(session)
+    return repo.list_logs(patient_id=patient_id)
 
 @app.get("/api/audit/patients/{patient_id}")
 def get_patient_audit_summary(patient_id: str, session: Session = Depends(get_session)):
     profile = session.exec(select(PatientProfile).where(PatientProfile.patient_id == patient_id)).first()
-    plans = session.exec(select(MealPlanRecord).where(MealPlanRecord.patient_id == patient_id)).all()
-    logs = session.exec(select(AuditLogRecord).where(AuditLogRecord.patient_id == patient_id)).all()
+    plans = list(session.exec(select(NutritionPlanRecord).where(NutritionPlanRecord.patient_id == patient_id)).all())
+    legacy_plans = session.exec(select(MealPlanRecord).where(MealPlanRecord.patient_id == patient_id)).all()
+    plans.extend(legacy_plans)
+    logs = session.exec(select(AuditLogRecord).where(
+        (AuditLogRecord.patient_id == patient_id) | (AuditLogRecord.user_id == patient_id)
+    )).all()
     feedback = session.exec(select(NutritionistFeedbackRecord).where(NutritionistFeedbackRecord.patient_id == patient_id)).all()
     return {
         "patient_id": patient_id,
@@ -154,7 +212,6 @@ def get_patient_audit_summary(patient_id: str, session: Session = Depends(get_se
         "logs": logs,
         "feedback": feedback,
     }
-
 @app.post("/api/audit/feedback")
 def submit_nutritionist_feedback(feedback_data: dict, session: Session = Depends(get_session)):
     rec = NutritionistFeedbackRecord(

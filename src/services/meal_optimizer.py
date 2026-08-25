@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 from scipy.optimize import linprog
 from typing import List, Dict, Any, Optional
@@ -6,7 +7,9 @@ from pydantic import BaseModel, Field
 from src.domain.ports.meal_optimizer_port import MealOptimizerPort
 from src.adapters.chroma_adapter import ChromaNutritionalRepository
 from src.adapters.usda_tbca_dataset import SEED_NUTRITIONAL_DATA
+from src.domain.services.guardrails import validate_nutrition_targets, DietTarget
 
+logger = logging.getLogger(__name__)
 class OptimizationRequest(BaseModel):
     target_calories: float = Field(gt=0, description="Meta calórica (kcal)")
     target_protein_g: float = Field(gt=0, description="Meta de proteína (g)")
@@ -14,7 +17,9 @@ class OptimizationRequest(BaseModel):
     target_fat_g: float = Field(gt=0, description="Meta de gorduras (g)")
     candidate_foods: Optional[List[Dict[str, Any]]] = Field(default=None, description="Lista inicial de candidatos")
     max_food_weight_g: float = Field(default=350.0, description="Peso máximo por alimento individual (g)")
-
+    patient_id: Optional[str] = Field(default="default_patient", description="ID do paciente")
+    session_id: Optional[str] = Field(default=None, description="ID da sessão")
+    is_single_meal: bool = Field(default=True, description="Flag indicando se é uma refeição isolada")
 class SelectedIngredient(BaseModel):
     food_id: str
     name: str
@@ -37,14 +42,43 @@ class OptimizationResult(BaseModel):
     message: str
 
 class MealOptimizerService(MealOptimizerPort):
-    def __init__(self, repo: Optional[ChromaNutritionalRepository] = None):
+    def __init__(self, repo: Optional[ChromaNutritionalRepository] = None, grocy_adapter: Optional[Any] = None):
         self.repo = repo
+        self.grocy_adapter = grocy_adapter
 
     def solve(self, request: OptimizationRequest) -> OptimizationResult:
+        # Extrair DTO leve para guardrails para evitar acoplamento
+        target_dto = DietTarget(
+            target_calories=request.target_calories,
+            target_protein_g=request.target_protein_g,
+            target_carbs_g=request.target_carbs_g,
+            target_fat_g=request.target_fat_g,
+            is_single_meal=request.is_single_meal,
+        )
+        guardrail_res = validate_nutrition_targets(target_dto)
+        if guardrail_res.guardrail_blocked:
+            return OptimizationResult(
+                success=False,
+                mape_error_percent=100.0,
+                total_calories=0.0,
+                total_protein_g=0.0,
+                total_carbs_g=0.0,
+                total_fat_g=0.0,
+                ingredients=[],
+                fallback_stage_used="guardrail_blocked",
+                message=guardrail_res.message,
+            )
+
         candidates = list(request.candidate_foods) if request.candidate_foods is not None else []
 
         if not candidates:
-            if self.repo:
+            if self.grocy_adapter:
+                try:
+                    candidates = self.grocy_adapter.get_candidate_foods()
+                except Exception as e:
+                    logger.warning("Grocy adapter candidate fetch failed, falling back: %s", e)
+                    candidates = []
+            if not candidates and self.repo:
                 candidates = self.repo.search_items(query="alimento", limit=20)
             if not candidates:
                 candidates = [item.to_metadata() for item in SEED_NUTRITIONAL_DATA]
