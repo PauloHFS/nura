@@ -1,3 +1,4 @@
+import src.patch_socketpair
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, List, Optional
 from fastapi import FastAPI, Depends, Request

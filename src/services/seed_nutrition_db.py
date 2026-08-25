@@ -1,3 +1,4 @@
+import src.patch_socketpair
 from src.adapters.chroma_adapter import ChromaNutritionalRepository
 from src.adapters.usda_tbca_dataset import SEED_NUTRITIONAL_DATA
 
